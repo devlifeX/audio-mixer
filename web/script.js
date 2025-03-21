@@ -226,7 +226,17 @@ async function mixAudio() {
     commandArray.push('-filter_complex', filterComplex);
 
     // Output options based on format
-    const outputFilename = `output.${format}`;
+    let outputFilename = `output.${format}`;
+    // Generate a filename with pattern: mixvid + first file name + date
+    const currentDate = new Date();
+    const dateString = currentDate.toISOString().split('T')[0]; // Format: YYYY-MM-DD
+
+    // Get the first file's name without extension
+    const mainFileName = mainAudioFile.name.replace(/\.[^/.]+$/, "");
+
+    // Create the output filename
+    const outputBaseName = `mixvid_${mainFileName}_${dateString}`;
+    outputFilename = `output.${format}`; // Keep the temp filename simple for ffmpeg
 
     if (format === 'mp3') {
       commandArray.push('-c:a', 'libmp3lame', '-q:a', quality);
@@ -267,8 +277,8 @@ async function mixAudio() {
     const blob = new Blob([data.buffer], { type: mimeTypes[format] || 'audio/mp3' });
     const url = URL.createObjectURL(blob);
 
-    // Update UI with the result
-    updateUI.showResult(url, format);
+    // Update UI with the result - pass the new filename pattern
+    updateUI.showResult(url, format, outputBaseName);
 
     log('Audio mixing completed successfully!');
   } catch (err) {
