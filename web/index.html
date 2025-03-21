@@ -9,16 +9,18 @@
     <link rel="stylesheet" href="style.css" />
     <script>
       // Cache-busting hash - change this on each build
-      const BUILD_HASH = "a52bbef2";
+      const BUILD_HASH = "babf57a0";
 
       // Add a global flag to track initialization
       window.appInitialized = false;
     </script>
 
     <!-- Load critical scripts in the head with defer -->
-    <script src="wasm_exec.js" defer></script>
-    <script src="ffmpeg.min.js" defer></script>
-    <script src="debug.js?v=44c7f661" defer></script>
+    <script src="wasm_exec.js?v=1" defer></script>
+    <script src="ffmpeg.min.js?v=1" defer></script>
+    <script src="debug.js?v=1" defer></script>
+    <script src="audio-processor.js?v=1"></script>
+    <script src="video-processor.js"></script>
   </head>
   <body>
     <div class="container">

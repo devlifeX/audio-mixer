@@ -39,10 +39,10 @@ async function initWasm() {
   }
 }
 
-// Call the WASM mixAudio function
+// Modified mixAudioWithWasm function to use browser-based audio processing
 async function mixAudioWithWasm(mainAudioData, bgAudioData, volume, duration) {
   if (window.debugSystem) {
-    window.debugSystem.log.info('wasm', 'Calling mixAudio WASM function', {
+    window.debugSystem.log.info('wasm', 'Calling audio mixing function', {
       mainAudioLength: mainAudioData ? mainAudioData.substring(0, 50) + '...' : 'null',
       bgAudioLength: bgAudioData ? bgAudioData.substring(0, 50) + '...' : 'null',
       volume,
@@ -51,37 +51,39 @@ async function mixAudioWithWasm(mainAudioData, bgAudioData, volume, duration) {
   }
 
   try {
-    // Check if the global mixAudio function from WASM is available
-    if (typeof window.mixAudio !== 'function') {
-      const error = 'WASM mixAudio function not available. Make sure WASM is properly loaded.';
-      if (window.debugSystem) {
-        window.debugSystem.log.error('wasm', error);
+    // Check if we should use the WASM implementation or fallback to browser implementation
+    if (typeof window.mixAudio === 'function' && !window.forceJSAudioProcessing) {
+      // Try WASM implementation first
+      try {
+        return await window.mixAudio(mainAudioData, bgAudioData, volume, duration);
+      } catch (wasmError) {
+        // If WASM fails with filesystem error, fallback to JS implementation
+        if (wasmError.message && wasmError.message.includes('not implemented on js')) {
+          console.warn('WASM filesystem operations not supported, falling back to JS implementation');
+          window.forceJSAudioProcessing = true; // Remember to use JS implementation for future calls
+        } else {
+          throw wasmError; // Re-throw other errors
+        }
       }
-      throw new Error(error);
     }
 
-    // Check if we have the right number of arguments (now 4 with duration)
-    if (arguments.length < 3 || arguments.length > 4) {
-      const error = 'Expected 3-4 arguments: mainAudioData, bgAudioData, volume, and optional duration';
-      if (window.debugSystem) {
-        window.debugSystem.log.error('wasm', error);
-      }
-      throw new Error(error);
-    }
-
-    // Call the WASM function with the provided parameters
-    const result = await window.mixAudio(mainAudioData, bgAudioData, volume, duration);
-
+    // Use browser-based audio processing as fallback
     if (window.debugSystem) {
-      window.debugSystem.log.info('wasm', 'mixAudio WASM function returned result', result);
+      window.debugSystem.log.info('audio', 'Using browser-based audio processing');
     }
 
-    return result;
+    // Make sure audio processor is available
+    if (!window.audioProcessor || !window.audioProcessor.processAudioMixing) {
+      throw new Error('Browser audio processor not available. Make sure audio-processor.js is loaded.');
+    }
+
+    // Process audio using browser APIs
+    return await window.audioProcessor.processAudioMixing(mainAudioData, bgAudioData, volume, duration);
   } catch (err) {
     if (window.debugSystem) {
-      window.debugSystem.log.error('wasm', 'Error calling WASM mixAudio function:', err);
+      window.debugSystem.log.error('wasm', 'Error mixing audio:', err);
     }
-    console.error('Error calling WASM mixAudio function:', err);
+    console.error('Error mixing audio:', err);
     throw err;
   }
 }
@@ -89,36 +91,46 @@ async function mixAudioWithWasm(mainAudioData, bgAudioData, volume, duration) {
 async function createVideoWithWasm(audioData, imageDataArray, settings) {
   if (window.debugSystem) {
     window.debugSystem.log.info('wasm', 'Calling createVideo WASM function', {
-      audioDataLength: audioData ? audioData.byteLength : 0,
+      audioDataLength: audioData ? audioData.length : 0,
       imageDataArrayLength: imageDataArray ? imageDataArray.length : 0,
       settings,
     });
   }
 
   try {
-    if (typeof window.createVideo !== 'function') {
-      const error = 'WASM createVideo function not available. Make sure WASM is properly loaded.';
-      if (window.debugSystem) {
-        window.debugSystem.log.error('wasm', error);
+    // Check if we should use the WASM implementation or fallback to browser implementation
+    if (typeof window.createVideo === 'function' && !window.forceJSVideoProcessing) {
+      // Try WASM implementation first
+      try {
+        return await window.createVideo(audioData, imageDataArray, settings);
+      } catch (wasmError) {
+        // If WASM fails with filesystem error, fallback to JS implementation
+        if (wasmError.message && wasmError.message.includes('not implemented on js')) {
+          console.warn('WASM filesystem operations not supported, falling back to JS implementation for video creation');
+          window.forceJSVideoProcessing = true; // Remember to use JS implementation for future calls
+        } else {
+          throw wasmError; // Re-throw other errors
+        }
       }
-      throw new Error(error);
     }
 
-    // Call the WASM function
-    const videoArrayBuffer = await window.createVideo(audioData, imageDataArray, settings);
-
+    // Use browser-based video processing as fallback
     if (window.debugSystem) {
-      window.debugSystem.log.info('wasm', 'createVideo WASM function returned result');
+      window.debugSystem.log.info('video', 'Using browser-based video processing');
     }
 
-    // Convert ArrayBuffer to Blob
-    const videoBlob = new Blob([videoArrayBuffer], { type: `video/${settings.videoFormat}` });
-    return videoBlob;
+    // Make sure video processor is available
+    if (!window.videoProcessor || !window.videoProcessor.createVideoFromImagesAndAudio) {
+      throw new Error('Browser video processor not available. Make sure video-processor.js is loaded.');
+    }
+
+    // Process video using browser APIs
+    return await window.videoProcessor.createVideoFromImagesAndAudio(imageDataArray, audioData, settings);
   } catch (err) {
     if (window.debugSystem) {
-      window.debugSystem.log.error('wasm', 'Error calling WASM createVideo function:', err);
+      window.debugSystem.log.error('wasm', 'Error creating video:', err);
     }
-    console.error('Error calling WASM createVideo function:', err);
+    console.error('Error creating video:', err);
     throw err;
   }
 }

@@ -192,6 +192,74 @@ function readBlobAsDataURL(blob) {
   });
 }
 
+// Mix audio only
+async function mixAudio() {
+  if (window.debugSystem) {
+    window.debugSystem.log.info('audio', 'Starting audio mix process');
+  }
+
+  const mainAudio = document.getElementById('mainAudio').files[0];
+  const bgAudio = document.getElementById('bgAudio').files[0];
+  const volume = document.getElementById('bgVolume').value;
+
+  if (!mainAudio || !bgAudio) {
+    log('Please select both audio files');
+    return;
+  }
+
+  try {
+    // Show progress container
+    const progressContainer = document.querySelector('.progress-container');
+    if (progressContainer) {
+      progressContainer.style.display = 'block';
+    }
+
+    // Read files as data URLs
+    const mainAudioData = await readFileAsDataURL(mainAudio);
+    const bgAudioData = await readFileAsDataURL(bgAudio);
+
+    // Get duration setting
+    const outputDuration = document.getElementById('outputDuration').value;
+    let duration = 0; // Default to 0 instead of null
+    if (outputDuration === 'custom') {
+      duration = parseFloat(document.getElementById('customDurationValue').value) || 0;
+    }
+
+    // Log parameters before calling WASM function
+    if (window.debugSystem) {
+      window.debugSystem.log.debug('audio', 'Mixing audio with parameters:', {
+        mainAudioLength: mainAudioData ? mainAudioData.length : 0,
+        bgAudioLength: bgAudioData ? bgAudioData.length : 0,
+        volume: volume / 100,
+        duration: duration
+      });
+    }
+
+    // Mix audio using WASM - ensure all parameters are valid
+    const result = await mixAudioWithWasm(
+      mainAudioData || '',
+      bgAudioData || '',
+      (volume / 100) || 0,
+      duration
+    );
+
+    // Update UI with result
+    updateUIWithResult(result, 'audio');
+    log('Audio mixing completed successfully');
+  } catch (error) {
+    log('Error mixing audio: ' + error.message);
+    if (window.debugSystem) {
+      window.debugSystem.log.error('audio', 'Error mixing audio:', error);
+    }
+  } finally {
+    // Hide progress container
+    const progressContainer = document.querySelector('.progress-container');
+    if (progressContainer) {
+      progressContainer.style.display = 'none';
+    }
+  }
+}
+
 // Update UI with result
 function updateUIWithResult(result, type) {
   const resultContainer = document.getElementById('resultContainer');
