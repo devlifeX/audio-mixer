@@ -1,3 +1,56 @@
+// Global array to store image files
+let imageFiles = [];
+
+// Initialize video UI components
+function initVideoUI() {
+  console.log("Initializing video UI components");
+
+  if (window.debugSystem) {
+    window.debugSystem.log.info('video', 'Initializing video UI components');
+  }
+
+  // Set up event handlers for video-related UI elements
+  const addImageButton = document.getElementById('addImageButton');
+  const distributeTimeButton = document.getElementById('distributeTimeButton');
+
+  // Add image button click handler
+  if (addImageButton) {
+    addImageButton.addEventListener('click', function () {
+      console.log("Add image button clicked");
+      if (window.debugSystem) {
+        window.debugSystem.log.debug('video', 'Add image button clicked');
+      }
+      addImageUpload();
+    });
+  } else {
+    console.error("Add image button not found");
+    if (window.debugSystem) {
+      window.debugSystem.log.error('video', 'Add image button not found');
+    }
+  }
+
+  // Distribute time button click handler
+  if (distributeTimeButton) {
+    distributeTimeButton.addEventListener('click', function () {
+      console.log("Distribute time button clicked");
+      if (window.debugSystem) {
+        window.debugSystem.log.debug('video', 'Distribute time button clicked');
+      }
+      distributeTimeEvenly();
+    });
+  } else {
+    console.error("Distribute time button not found");
+    if (window.debugSystem) {
+      window.debugSystem.log.error('video', 'Distribute time button not found');
+    }
+  }
+
+  console.log("Video UI initialization complete");
+  if (window.debugSystem) {
+    window.debugSystem.log.info('video', 'Video UI initialization complete');
+  }
+}
+
 // Add a new image upload field
 function addImageUpload() {
   const imageUploadsContainer = document.getElementById('imageUploadsContainer');
@@ -107,3 +160,17 @@ function readFileAsArrayBuffer(file) {
     reader.readAsArrayBuffer(file);
   });
 }
+
+// IMPORTANT: Export functions to global scope
+window.initVideoUI = initVideoUI;
+window.addImageUpload = addImageUpload;
+window.distributeTimeEvenly = distributeTimeEvenly;
+window.getTotalDuration = getTotalDuration;
+window.readFileAsArrayBuffer = readFileAsArrayBuffer;
+
+// Log that video-ui.js has loaded and exported functions
+console.log('video-ui.js loaded and functions exported to global scope:', {
+  initVideoUI: typeof window.initVideoUI === 'function',
+  addImageUpload: typeof window.addImageUpload === 'function',
+  distributeTimeEvenly: typeof window.distributeTimeEvenly === 'function'
+});
