@@ -3,15 +3,22 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>Audio Mixer</title>
+    <meta http-equiv="Cross-Origin-Opener-Policy" content="same-origin" />
+    <meta http-equiv="Cross-Origin-Embedder-Policy" content="require-corp" />
+    <title>Audio/Video Mixer</title>
     <link rel="stylesheet" href="style.css" />
-    <!-- Import FFmpeg WASM libraries - newer version with better compatibility -->
-    <script src="https://cdn.jsdelivr.net/npm/@ffmpeg/ffmpeg@0.11.6/dist/ffmpeg.min.js"></script>
-    <script src="https://cdn.jsdelivr.net/npm/@ffmpeg/util@0.12.1/dist/index.min.js"></script>
-    <!-- Import wasm_exec.js for Go WASM support -->
-    <script src="wasm_exec.js"></script>
-    <!-- Import our main script as a module -->
-    <script type="module" src="script.js"></script>
+    <script>
+      // Cache-busting hash - change this on each build
+      const BUILD_HASH = "2dcb3c72";
+
+      // Add a global flag to track initialization
+      window.appInitialized = false;
+    </script>
+
+    <!-- Load critical scripts in the head with defer -->
+    <script src="wasm_exec.js" defer></script>
+    <script src="ffmpeg.min.js" defer></script>
+    <script src="debug.js?v=44c7f661" defer></script>
   </head>
   <body>
     <div class="container">
@@ -36,111 +43,227 @@
         this page via HTTPS or localhost.
       </div>
 
+      <!-- Mode selector -->
+      <div class="mode-selector" id="modeSelector">
+        <h2>Select Mode</h2>
+        <div class="mode-options">
+          <label class="mode-option">
+            <input type="radio" name="mode" id="audioOnlyRadio" checked />
+            <span class="mode-label">Audio Only</span>
+          </label>
+          <label class="mode-option">
+            <input type="radio" name="mode" id="videoWithImagesRadio" />
+            <span class="mode-label">Video with Images</span>
+          </label>
+        </div>
+      </div>
+
       <!-- Settings toggle button -->
       <div class="settings-toggle">
         <button id="settingsToggle" class="toggle-btn">
           <span id="settingsIcon">⚙️</span> Settings
         </button>
       </div>
-
       <!-- Settings panel -->
       <div id="settingsPanel" class="settings-panel">
-        <h3>Settings</h3>
-        <div class="setting-item">
-          <label for="outputFormat">Output Format:</label>
+        <h2>Output Settings</h2>
+        <div class="settings-group">
+          <label for="outputFormat">Format:</label>
           <select id="outputFormat">
-            <option value="mp3" selected>MP3</option>
-            <option value="wav">WAV</option>
-            <option value="ogg">OGG</option>
+            <option value="mp3">MP3</option>
+            <option value="mp4">MP4 (Video)</option>
           </select>
         </div>
-        <div class="setting-item">
-          <label for="outputQuality">Output Quality:</label>
+        <div class="settings-group">
+          <label for="outputQuality">Quality:</label>
           <select id="outputQuality">
             <option value="1">High</option>
             <option value="2" selected>Medium</option>
             <option value="3">Low</option>
           </select>
         </div>
-        <div class="setting-item">
-          <label>
-            <input type="checkbox" id="normalizeAudio" checked />
-            Normalize audio levels
-          </label>
+        <div class="settings-group">
+          <label for="normalizeAudio">Normalize Audio:</label>
+          <input type="checkbox" id="normalizeAudio" />
         </div>
-        <!-- Duration setting -->
-        <div class="setting-item">
-          <label for="outputDuration">Output Duration:</label>
+        <div class="settings-group">
+          <label for="outputDuration">Duration:</label>
           <select id="outputDuration">
-            <option value="shortest">Shortest Input</option>
-            <option value="longest" selected>Longest Input</option>
-            <option value="main">Main Audio Length</option>
-            <option value="bg">Background Audio Length</option>
-            <option value="custom">Custom Duration (seconds)</option>
+            <option value="main" selected>Use Main Audio Length</option>
+            <option value="bg">Use Background Audio Length</option>
+            <option value="shortest">Use Shortest</option>
+            <option value="longest">Use Longest</option>
+            <option value="custom">Custom Duration</option>
           </select>
+        </div>
+        <div
+          class="settings-group"
+          id="customDurationContainer"
+          style="display: none"
+        >
+          <label for="customDurationValue">Custom Duration (seconds):</label>
+          <input type="number" id="customDurationValue" min="1" value="30" />
+        </div>
+
+        <!-- Video Settings -->
+        <div id="videoSettingsContainer" style="display: none">
+          <h3>Video Settings</h3>
+          <div class="settings-group">
+            <label for="videoSize">Video Size:</label>
+            <select id="videoSize">
+              <option value="instagram">Instagram (1080x1080)</option>
+              <option value="youtube" selected>YouTube (1920x1080)</option>
+              <option value="tiktok">TikTok (1080x1920)</option>
+              <option value="custom">Custom Size</option>
+            </select>
+          </div>
           <div
-            id="customDurationContainer"
-            style="display: none; margin-top: 8px"
+            class="settings-group"
+            id="customVideoSizeContainer"
+            style="display: none"
           >
+            <label for="customVideoWidth">Width:</label>
             <input
               type="number"
-              id="customDurationValue"
-              min="1"
-              step="1"
-              value="60"
-              style="width: 100%"
+              id="customVideoWidth"
+              min="100"
+              max="3840"
+              value="1920"
+            />
+            <label for="customVideoHeight">Height:</label>
+            <input
+              type="number"
+              id="customVideoHeight"
+              min="100"
+              max="2160"
+              value="1080"
             />
           </div>
         </div>
       </div>
 
       <div class="file-inputs">
+        <h2>Audio Files</h2>
         <div class="input-group">
           <label for="mainAudio">Main Audio:</label>
-          <input type="file" id="mainAudio" accept="audio/*,video/*" />
-          <div class="preview" id="mainAudioPreview">
-            <audio controls id="mainAudioPlayer" style="display: none"></audio>
-          </div>
+          <input type="file" id="mainAudio" accept="audio/*" />
         </div>
-
         <div class="input-group">
           <label for="bgAudio">Background Audio:</label>
-          <input type="file" id="bgAudio" accept="audio/*,video/*" />
-          <div class="preview" id="bgAudioPreview">
-            <audio controls id="bgAudioPlayer" style="display: none"></audio>
-          </div>
+          <input type="file" id="bgAudio" accept="audio/*" />
         </div>
+        <div class="input-group">
+          <label for="bgVolume">Background Volume:</label>
+          <input type="range" id="bgVolume" min="0" max="100" value="30" />
+          <span id="volumeValue">30%</span>
+        </div>
+      </div>
+
+      <!-- Image uploads container -->
+      <div
+        class="image-uploads"
+        id="imageUploadsContainer"
+        style="display: none"
+      >
+        <h2>Images for Video</h2>
+        <p>Add images to create a slideshow video with your audio</p>
+        <div class="image-uploads-controls">
+          <button type="button" id="addImageButton">Add Image</button>
+          <button type="button" id="distributeTimeButton">
+            Distribute Time Evenly
+          </button>
+        </div>
+        <!-- Image upload items will be added here dynamically -->
       </div>
 
       <div class="controls">
-        <label for="volumeControl">Background Volume:</label>
-        <input
-          type="range"
-          id="volumeControl"
-          min="0"
-          max="1"
-          step="0.05"
-          value="0.3"
-        />
-        <span id="volumeValue">0.3</span>
+        <button id="mixButton" disabled>Mix Audio</button>
       </div>
 
-      <button id="mixButton" disabled>Mix Audio</button>
-
       <div class="progress-container" style="display: none">
-        <div class="progress-bar">
-          <div class="progress" id="progressBar"></div>
+        <div class="progress-bar-container">
+          <div id="progressBar" class="progress-bar"></div>
         </div>
         <div id="progressText">Processing: 0%</div>
       </div>
 
       <div class="result" id="resultContainer" style="display: none">
-        <h3>Result</h3>
-        <audio controls id="resultAudio"></audio>
-        <a id="downloadLink" class="download-btn">Download MP3</a>
+        <h2>Result</h2>
+        <div id="resultMediaContainer"></div>
+        <a id="downloadLink" href="#" download="mixed_audio.mp3"
+          >Download MP3</a
+        >
       </div>
 
       <div class="logs" id="logs"></div>
     </div>
+
+    <!-- Load application scripts in the correct order -->
+    <script>
+      // Function to load scripts with cache-busting
+      function loadScript(src) {
+        return new Promise((resolve, reject) => {
+          const script = document.createElement("script");
+          script.src = src + "?v=" + BUILD_HASH;
+          script.onload = resolve;
+          script.onerror = reject;
+          document.body.appendChild(script);
+        });
+      }
+
+      // Load scripts in sequence with explicit console logs
+      async function loadAllScripts() {
+        try {
+          console.log("Loading wasm.js...");
+          await loadScript("wasm.js");
+          console.log("wasm.js loaded");
+
+          console.log("Loading ui.js...");
+          await loadScript("ui.js");
+          console.log("ui.js loaded");
+
+          console.log("Loading settings.js...");
+          await loadScript("settings.js");
+          console.log("settings.js loaded");
+
+          console.log("Loading video-ui.js...");
+          await loadScript("video-ui.js");
+          console.log("video-ui.js loaded");
+
+          console.log("Loading script.js...");
+          await loadScript("script.js");
+          console.log("script.js loaded");
+
+          console.log("All scripts loaded successfully");
+
+          // Manually initialize the application
+          if (typeof init === "function") {
+            console.log("Manually calling init() function");
+            init();
+          } else {
+            console.error("init function not found after loading all scripts");
+          }
+        } catch (error) {
+          console.error("Error loading scripts:", error);
+        }
+      }
+
+      // Wait for DOM content to be loaded
+      document.addEventListener("DOMContentLoaded", function () {
+        console.log("DOM content loaded, initializing application");
+
+        // Initialize debug system if available
+        if (
+          window.debugSystem &&
+          typeof window.debugSystem.init === "function"
+        ) {
+          console.log("Initializing debug system from DOMContentLoaded");
+          window.debugSystem.init();
+        }
+
+        // Load all scripts
+        loadAllScripts();
+      });
+    </script>
   </body>
 </html>
