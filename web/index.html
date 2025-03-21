@@ -9,7 +9,7 @@
     <link rel="stylesheet" href="style.css" />
     <script>
       // Cache-busting hash - change this on each build
-      const BUILD_HASH = "3e4222c7";
+      const BUILD_HASH = "c18de8a7";
 
       // Add a global flag to track initialization
       window.appInitialized = false;
@@ -211,16 +211,17 @@
         });
       }
 
-      // Load scripts in sequence with explicit console logs
+      // Replace the existing loadAllScripts function with this updated version
       async function loadAllScripts() {
         try {
+          // Load script.js first so init function is available early
+          console.log("Loading script.js...");
+          await loadScript("script.js");
+          console.log("script.js loaded");
+
           console.log("Loading wasm.js...");
           await loadScript("wasm.js");
           console.log("wasm.js loaded");
-
-          console.log("Loading ui.js...");
-          await loadScript("ui.js");
-          console.log("ui.js loaded");
 
           console.log("Loading settings.js...");
           await loadScript("settings.js");
@@ -230,18 +231,24 @@
           await loadScript("video-ui.js");
           console.log("video-ui.js loaded");
 
-          console.log("Loading script.js...");
-          await loadScript("script.js");
-          console.log("script.js loaded");
+          console.log("Loading ui.js...");
+          await loadScript("ui.js");
+          console.log("ui.js loaded");
 
           console.log("All scripts loaded successfully");
 
           // Manually initialize the application
-          if (typeof init === "function") {
+          if (typeof window.init === "function") {
             console.log("Manually calling init() function");
-            init();
+            window.init();
           } else {
             console.error("init function not found after loading all scripts");
+            console.error(
+              "Available global functions:",
+              Object.keys(window).filter(
+                (key) => typeof window[key] === "function"
+              )
+            );
           }
         } catch (error) {
           console.error("Error loading scripts:", error);

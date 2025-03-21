@@ -1,4 +1,3 @@
-// Initialize UI
 function initUI() {
   console.log("initUI function called");
 
@@ -140,6 +139,50 @@ function initUI() {
         console.error("mixAudio function not found");
         mixButton.disabled = false;
         mixButton.textContent = 'Mix Audio';
+      }
+    });
+  }
+
+  // Add mode switching handlers
+  const audioOnlyRadio = document.getElementById('audioOnlyRadio');
+  const videoWithImagesRadio = document.getElementById('videoWithImagesRadio');
+  const imageUploadsContainer = document.getElementById('imageUploadsContainer');
+  const videoSettingsContainer = document.getElementById('videoSettingsContainer');
+
+  if (audioOnlyRadio) {
+    audioOnlyRadio.addEventListener('change', () => {
+      if (window.debugSystem) {
+        window.debugSystem.log.info('ui', 'Switched to audio-only mode');
+      }
+      if (imageUploadsContainer) {
+        imageUploadsContainer.style.display = 'none';
+      }
+      if (videoSettingsContainer) {
+        videoSettingsContainer.style.display = 'none';
+      }
+    });
+  }
+
+  if (videoWithImagesRadio) {
+    videoWithImagesRadio.addEventListener('change', () => {
+      if (window.debugSystem) {
+        window.debugSystem.log.info('ui', 'Switched to video with images mode');
+      }
+      if (imageUploadsContainer) {
+        imageUploadsContainer.style.display = 'block';
+      }
+      if (videoSettingsContainer) {
+        videoSettingsContainer.style.display = 'block';
+      }
+
+      // Initialize video UI if not already done
+      if (typeof initVideoUI === 'function') {
+        initVideoUI();
+      } else {
+        console.error('initVideoUI function not found');
+        if (window.debugSystem) {
+          window.debugSystem.log.error('ui', 'initVideoUI function not found');
+        }
       }
     });
   }

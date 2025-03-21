@@ -1,216 +1,109 @@
-// Video UI functionality
-
-// Global variables
-let isVideoMode = false;
-let imageFiles = [];
-
-// Initialize video UI components
-function initVideoUI() {
-  if (window.debugSystem) {
-    window.debugSystem.log.info('video', 'Initializing video UI');
-  }
-
-  const modeSelector = document.getElementById('modeSelector');
-  const audioOnlyRadio = document.getElementById('audioOnlyRadio');
-  const videoWithImagesRadio = document.getElementById('videoWithImagesRadio');
-  const imageUploadsContainer = document.getElementById('imageUploadsContainer');
-  const addImageButton = document.getElementById('addImageButton');
-  const distributeTimeButton = document.getElementById('distributeTimeButton');
-
-  // Log UI elements found/not found
-  if (window.debugSystem) {
-    window.debugSystem.log.debug('video', 'UI elements found:', {
-      modeSelector: !!modeSelector,
-      audioOnlyRadio: !!audioOnlyRadio,
-      videoWithImagesRadio: !!videoWithImagesRadio,
-      imageUploadsContainer: !!imageUploadsContainer,
-      addImageButton: !!addImageButton,
-      distributeTimeButton: !!distributeTimeButton
-    });
-  }
-
-  // Set default mode
-  isVideoMode = videoWithImagesRadio?.checked || false;
-
-  if (window.debugSystem) {
-    window.debugSystem.log.info('video', `Initial video mode set to: ${isVideoMode ? 'Video with images' : 'Audio only'}`);
-  }
-
-  // Show/hide image uploads based on initial mode
-  if (imageUploadsContainer) {
-    imageUploadsContainer.style.display = isVideoMode ? 'block' : 'none';
-
-    if (window.debugSystem) {
-      window.debugSystem.log.debug('video', `Image uploads container display: ${imageUploadsContainer.style.display}`);
-    }
-  } else if (window.debugSystem) {
-    window.debugSystem.log.error('video', 'Image uploads container element not found');
-  }
-
-  // Toggle between audio and video modes
-  if (audioOnlyRadio) {
-    audioOnlyRadio.addEventListener('change', () => {
-      isVideoMode = false;
-      if (window.debugSystem) {
-        window.debugSystem.log.info('video', 'Switched to audio-only mode');
-      }
-
-      if (imageUploadsContainer) {
-        imageUploadsContainer.style.display = 'none';
-      }
-
-      const videoSettingsContainer = document.getElementById('videoSettingsContainer');
-      if (videoSettingsContainer) {
-        videoSettingsContainer.style.display = 'none';
-      }
-
-      if (typeof checkFilesLoaded === 'function') {
-        checkFilesLoaded(); // Update mix button state
-      } else if (window.debugSystem) {
-        window.debugSystem.log.error('video', 'checkFilesLoaded function not found');
-      }
-    });
-  } else if (window.debugSystem) {
-    window.debugSystem.log.error('video', 'Audio-only radio button not found');
-  }
-
-  if (videoWithImagesRadio) {
-    videoWithImagesRadio.addEventListener('change', () => {
-      isVideoMode = true;
-      if (window.debugSystem) {
-        window.debugSystem.log.info('video', 'Switched to video with images mode');
-      }
-
-      if (imageUploadsContainer) {
-        imageUploadsContainer.style.display = 'block';
-      }
-
-      const videoSettingsContainer = document.getElementById('videoSettingsContainer');
-      if (videoSettingsContainer) {
-        videoSettingsContainer.style.display = 'block';
-      }
-
-      if (typeof checkFilesLoaded === 'function') {
-        checkFilesLoaded(); // Update mix button state
-      } else if (window.debugSystem) {
-        window.debugSystem.log.error('video', 'checkFilesLoaded function not found');
-      }
-    });
-  } else if (window.debugSystem) {
-    window.debugSystem.log.error('video', 'Video with images radio button not found');
-  }
-
-  // Add image handler
-  if (addImageButton) {
-    addImageButton.addEventListener('click', () => {
-      if (window.debugSystem) {
-        window.debugSystem.log.info('video', 'Add image button clicked');
-      }
-      addImageUpload();
-    });
-  } else if (window.debugSystem) {
-    window.debugSystem.log.error('video', 'Add image button not found');
-  }
-
-  // Distribute time evenly among images
-  if (distributeTimeButton) {
-    distributeTimeButton.addEventListener('click', () => {
-      if (window.debugSystem) {
-        window.debugSystem.log.info('video', 'Distribute time button clicked');
-      }
-      distributeTimeEvenly();
-    });
-  } else if (window.debugSystem) {
-    window.debugSystem.log.error('video', 'Distribute time button not found');
-  }
-
-  // Add initial image upload field
-  addImageUpload();
-
-  // Add export video functionality
-  const exportVideoButton = document.getElementById('exportVideoButton');
-  if (exportVideoButton) {
-    exportVideoButton.addEventListener('click', async () => {
-      if (window.debugSystem) {
-        window.debugSystem.log.info('video', 'Export Video button clicked');
-      }
-      try {
-        // Get audio and image data
-        const audioFile = document.getElementById('mainAudio').files[0];
-        const settings = getSettings(); // Use settings.js to retrieve current settings
-
-        if (!audioFile) {
-          log('Please select an audio file before exporting the video.');
-          if (window.debugSystem) {
-            window.debugSystem.log.warn('video', 'No audio file selected');
-          }
-          return;
-        }
-
-        const audioData = await readFileAsArrayBuffer(audioFile); // Read audio as ArrayBuffer
-        const imageDataArray = imageFiles.map(fileObj => ({
-          file: fileObj.file,
-          duration: fileObj.duration,
-        }));
-
-        // Call the createVideoWithWasm function
-        const videoBlob = await createVideoWithWasm(audioData, imageDataArray, settings);
-
-        // Create a download link for the video
-        const downloadLink = document.createElement('a');
-        downloadLink.href = URL.createObjectURL(videoBlob);
-        downloadLink.download = `exported_video.${settings.videoFormat}`;
-        downloadLink.textContent = 'Download Video';
-        downloadLink.style.display = 'block';
-
-        const resultContainer = document.getElementById('resultContainer');
-        if (resultContainer) {
-          resultContainer.innerHTML = ''; // Clear previous results
-          resultContainer.appendChild(downloadLink);
-          resultContainer.style.display = 'block';
-        }
-
-        log('Video exported successfully!');
-        if (window.debugSystem) {
-          window.debugSystem.log.info('video', 'Video exported successfully');
-        }
-      } catch (error) {
-        console.error('Error exporting video:', error);
-        log('Error exporting video: ' + error.message);
-        if (window.debugSystem) {
-          window.debugSystem.log.error('video', 'Error exporting video:', error);
-        }
-      }
-    });
-  } else if (window.debugSystem) {
-    window.debugSystem.log.error('video', 'Export Video button not found');
-  }
-  if (window.debugSystem) {
-    window.debugSystem.log.info('video', 'Video UI initialization completed');
-  }
-}
-
 // Add a new image upload field
 function addImageUpload() {
-  // ... existing code ...
+  const imageUploadsContainer = document.getElementById('imageUploadsContainer');
+  if (!imageUploadsContainer) return;
+
+  const imageItem = document.createElement('div');
+  imageItem.className = 'image-upload-item';
+
+  // Create file input
+  const fileInput = document.createElement('input');
+  fileInput.type = 'file';
+  fileInput.accept = 'image/*';
+  fileInput.className = 'image-file';
+
+  // Create duration input
+  const durationInput = document.createElement('input');
+  durationInput.type = 'number';
+  durationInput.min = '0.1';
+  durationInput.step = '0.1';
+  durationInput.value = '3.0';
+  durationInput.className = 'image-duration';
+
+  // Create remove button
+  const removeButton = document.createElement('button');
+  removeButton.textContent = '✕';
+  removeButton.className = 'remove-image';
+  removeButton.onclick = () => {
+    imageItem.remove();
+    rebuildImageFilesArray();
+  };
+
+  // Add file change handler
+  fileInput.addEventListener('change', (e) => {
+    if (e.target.files[0]) {
+      imageFiles.push({
+        file: e.target.files[0],
+        duration: parseFloat(durationInput.value)
+      });
+    }
+  });
+
+  // Add duration change handler
+  durationInput.addEventListener('change', () => {
+    rebuildImageFilesArray();
+  });
+
+  // Append elements
+  imageItem.appendChild(fileInput);
+  imageItem.appendChild(durationInput);
+  imageItem.appendChild(removeButton);
+  imageUploadsContainer.appendChild(imageItem);
 }
+
 // Rebuild the imageFiles array after removing an item
 function rebuildImageFilesArray() {
-  // ... existing code ...
+  imageFiles = [];
+  const containers = document.querySelectorAll('.image-upload-item');
+  containers.forEach(container => {
+    const fileInput = container.querySelector('.image-file');
+    const durationInput = container.querySelector('.image-duration');
+    if (fileInput.files[0]) {
+      imageFiles.push({
+        file: fileInput.files[0],
+        duration: parseFloat(durationInput.value)
+      });
+    }
+  });
 }
 
 // Distribute time evenly among all images
 function distributeTimeEvenly() {
-  // ... existing code ...
+  const totalDuration = getTotalDuration();
+  const containers = document.querySelectorAll('.image-upload-item');
+  const count = containers.length;
+
+  if (count === 0) return;
+
+  const durationPerImage = totalDuration / count;
+
+  containers.forEach(container => {
+    const durationInput = container.querySelector('.image-duration');
+    durationInput.value = durationPerImage.toFixed(1);
+  });
+
+  rebuildImageFilesArray();
 }
 
 // Get total duration from settings
 function getTotalDuration() {
-  // ... existing code ...
-}
-// Read file as array buffer (for FFmpeg)
-function readFileAsArrayBuffer(file) {
-  // ... existing code ...
+  const outputDuration = document.getElementById('outputDuration')?.value;
+  const customDuration = document.getElementById('customDurationValue')?.value;
+
+  if (outputDuration === 'custom' && customDuration) {
+    return parseFloat(customDuration);
+  }
+
+  // Default duration if no custom value is set
+  return 30.0;
 }
 
-// Read file as data URL (for preview and W
+// Read file as array buffer (for FFmpeg)
+function readFileAsArrayBuffer(file) {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () => resolve(reader.result);
+    reader.onerror = () => reject(reader.error);
+    reader.readAsArrayBuffer(file);
+  });
+}

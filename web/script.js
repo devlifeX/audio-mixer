@@ -1,4 +1,4 @@
-// Add this function near the top of script.js
+// Define log function first so it's available for other functions
 function log(message) {
   console.log(message);
 
@@ -52,18 +52,40 @@ function checkFilesLoaded() {
   }
 }
 
-// Add this after the initFFmpeg function definition
+// Initialize FFmpeg
 async function initFFmpeg() {
   if (window.debugSystem) {
     window.debugSystem.log.info('ffmpeg', 'Initializing FFmpeg');
   }
 
   try {
-    // Placeholder for actual FFmpeg initialization
-    log('FFmpeg initialized successfully');
-    return true;
+    // Create FFmpeg instance if available
+    if (typeof createFFmpeg === 'function') {
+      const ffmpeg = createFFmpeg({
+        log: true,
+        progress: ({ ratio }) => {
+          const progressBar = document.getElementById('progressBar');
+          const progressText = document.getElementById('progressText');
+          if (progressBar && progressText) {
+            const percent = Math.round(ratio * 100);
+            progressBar.style.width = `${percent}%`;
+            progressText.textContent = `Processing: ${percent}%`;
+          }
+        }
+      });
+
+      // Load FFmpeg
+      await ffmpeg.load();
+      window.ffmpeg = ffmpeg; // Store FFmpeg instance globally
+
+      log('FFmpeg initialized successfully');
+      return true;
+    } else {
+      log('createFFmpeg function not available');
+      return false;
+    }
   } catch (error) {
-    log('Error initializing FFmpeg:', error);
+    log('Error initializing FFmpeg: ' + error.message);
     if (window.debugSystem) {
       window.debugSystem.log.error('ffmpeg', 'Error initializing FFmpeg:', error);
     }
@@ -132,25 +154,15 @@ async function init() {
     // Load FFmpeg
     log("Calling initFFmpeg()");
     const ffmpegLoaded = await initFFmpeg();
-    log("initFFmpeg() completed, result:", ffmpegLoaded);
-    if (!ffmpegLoaded) {
-      log('Failed to load FFmpeg');
-      if (window.debugSystem) {
-        window.debugSystem.log.error('system', 'Failed to load FFmpeg');
-      }
-      throw new Error('Failed to load FFmpeg');
-    }
+    log("initFFmpeg() completed, result: " + ffmpegLoaded);
 
     // Load WASM
-    log("Calling initWasm()");
-    const wasmLoaded = await initWasm();
-    log("initWasm() completed, result:", wasmLoaded);
-    if (!wasmLoaded) {
-      log('Failed to load WASM');
-      if (window.debugSystem) {
-        window.debugSystem.log.error('system', 'Failed to load WASM');
-      }
-      throw new Error('Failed to load WASM');
+    if (typeof initWasm === 'function') {
+      log("Calling initWasm()");
+      const wasmLoaded = await initWasm();
+      log("initWasm() completed, result: " + wasmLoaded);
+    } else {
+      log("initWasm function not found");
     }
 
     // Mark initialization as complete
@@ -160,15 +172,117 @@ async function init() {
       window.debugSystem.log.info('system', 'Application initialization complete');
     }
   } catch (err) {
-    log('Initialization error:', err);
+    log('Initialization error: ' + err.message);
     if (window.debugSystem) {
       window.debugSystem.log.error('system', 'Initialization error:', err);
     }
   }
 }
 
-// Export functions to global scope
-window.checkFilesLoaded = checkFilesLoaded;
+// Add audio mixing function
+async function mixAudio() {
+  if (window.debugSystem) {
+    window.debugSystem.log.info('audio', 'Starting audio mix process');
+  }
+
+  const mainAudio = document.getElementById('mainAudio').files[0];
+  const bgAudio = document.getElementById('bgAudio').files[0];
+  const volume = document.getElementById('bgVolume').value;
+
+  if (!mainAudio || !bgAudio) {
+    log('Please select both audio files');
+    return;
+  }
+
+  try {
+    // Show progress container
+    const progressContainer = document.querySelector('.progress-container');
+    if (progressContainer) {
+      progressContainer.style.display = 'block';
+    }
+
+    // Read files as data URLs
+    const mainAudioData = await readFileAsDataURL(mainAudio);
+    const bgAudioData = await readFileAsDataURL(bgAudio);
+
+    // Get duration setting
+    const outputDuration = document.getElementById('outputDuration').value;
+    let duration = null;
+    if (outputDuration === 'custom') {
+      duration = parseFloat(document.getElementById('customDurationValue').value);
+    }
+
+    // Mix audio using WASM if available
+    if (typeof mixAudioWithWasm === 'function') {
+      const result = await mixAudioWithWasm(mainAudioData, bgAudioData, volume / 100, duration);
+      updateUIWithResult(result);
+    } else {
+      log('mixAudioWithWasm function not available');
+    }
+
+    log('Audio mixing completed successfully');
+  } catch (error) {
+    log('Error mixing audio: ' + error.message);
+    if (window.debugSystem) {
+      window.debugSystem.log.error('audio', 'Error mixing audio:', error);
+    }
+  } finally {
+    // Hide progress container
+    const progressContainer = document.querySelector('.progress-container');
+    if (progressContainer) {
+      progressContainer.style.display = 'none';
+    }
+  }
+}
+
+// Helper function to read file as Data URL
+function readFileAsDataURL(file) {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () => resolve(reader.result);
+    reader.onerror = reject;
+    reader.readAsDataURL(file);
+  });
+}
+
+// Helper function to update UI with mix result
+function updateUIWithResult(result) {
+  const resultContainer = document.getElementById('resultContainer');
+  const resultMediaContainer = document.getElementById('resultMediaContainer');
+  const downloadLink = document.getElementById('downloadLink');
+
+  if (resultContainer && resultMediaContainer && downloadLink) {
+    // Clear previous results
+    resultMediaContainer.innerHTML = '';
+
+    // Create audio player for preview
+    const audio = document.createElement('audio');
+    audio.controls = true;
+    audio.src = URL.createObjectURL(result);
+    resultMediaContainer.appendChild(audio);
+
+    // Update download link
+    downloadLink.href = audio.src;
+    downloadLink.style.display = 'block';
+
+    // Show result container
+    resultContainer.style.display = 'block';
+  }
+}
+
+// IMPORTANT: Export functions to global scope
 window.init = init;
+window.checkFilesLoaded = checkFilesLoaded;
 window.initFFmpeg = initFFmpeg;
-window.log = log; // Add this line to export log function
+window.log = log;
+window.mixAudio = mixAudio;
+window.readFileAsDataURL = readFileAsDataURL;
+window.updateUIWithResult = updateUIWithResult;
+
+// Log that script.js has loaded and exported functions
+console.log('script.js loaded and functions exported to global scope:', {
+  init: typeof window.init === 'function',
+  checkFilesLoaded: typeof window.checkFilesLoaded === 'function',
+  log: typeof window.log === 'function',
+  mixAudio: typeof window.mixAudio === 'function'
+});
