@@ -32,6 +32,40 @@
         this page via HTTPS or localhost.
       </div>
 
+      <!-- Settings toggle button -->
+      <div class="settings-toggle">
+        <button id="settingsToggle" class="toggle-btn">
+          <span id="settingsIcon">⚙️</span> Settings
+        </button>
+      </div>
+
+      <!-- Settings panel -->
+      <div id="settingsPanel" class="settings-panel">
+        <h3>Settings</h3>
+        <div class="setting-item">
+          <label for="outputFormat">Output Format:</label>
+          <select id="outputFormat">
+            <option value="mp3" selected>MP3</option>
+            <option value="wav">WAV</option>
+            <option value="ogg">OGG</option>
+          </select>
+        </div>
+        <div class="setting-item">
+          <label for="outputQuality">Output Quality:</label>
+          <select id="outputQuality">
+            <option value="1">High</option>
+            <option value="2" selected>Medium</option>
+            <option value="3">Low</option>
+          </select>
+        </div>
+        <div class="setting-item">
+          <label>
+            <input type="checkbox" id="normalizeAudio" checked />
+            Normalize audio levels
+          </label>
+        </div>
+      </div>
+
       <div class="file-inputs">
         <div class="input-group">
           <label for="mainAudio">Main Audio:</label>

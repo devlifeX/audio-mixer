@@ -20,6 +20,67 @@ const downloadLink = document.getElementById('downloadLink');
 const logsElement = document.getElementById('logs');
 const sabWarning = document.getElementById('sabWarning');
 
+// Settings elements
+const settingsToggle = document.getElementById('settingsToggle');
+const settingsPanel = document.getElementById('settingsPanel');
+const outputFormat = document.getElementById('outputFormat');
+const outputQuality = document.getElementById('outputQuality');
+const normalizeAudio = document.getElementById('normalizeAudio');
+
+// Settings management
+function initSettings() {
+  // Load settings panel state from localStorage
+  const isPanelHidden = localStorage.getItem('settingsPanelHidden') === 'true';
+
+  // Apply initial state
+  if (isPanelHidden) {
+    settingsPanel.classList.add('hidden');
+  } else {
+    settingsPanel.classList.remove('hidden');
+  }
+
+  // Toggle settings panel visibility
+  settingsToggle.addEventListener('click', () => {
+    const isHidden = settingsPanel.classList.toggle('hidden');
+    localStorage.setItem('settingsPanelHidden', isHidden);
+  });
+
+  // Load saved settings values if they exist
+  if (localStorage.getItem('outputFormat')) {
+    outputFormat.value = localStorage.getItem('outputFormat');
+  }
+
+  if (localStorage.getItem('outputQuality')) {
+    outputQuality.value = localStorage.getItem('outputQuality');
+  }
+
+  if (localStorage.getItem('normalizeAudio') !== null) {
+    normalizeAudio.checked = localStorage.getItem('normalizeAudio') === 'true';
+  }
+
+  // Save settings when changed
+  outputFormat.addEventListener('change', () => {
+    localStorage.setItem('outputFormat', outputFormat.value);
+    updateDownloadLinkExtension();
+  });
+
+  outputQuality.addEventListener('change', () => {
+    localStorage.setItem('outputQuality', outputQuality.value);
+  });
+
+  normalizeAudio.addEventListener('change', () => {
+    localStorage.setItem('normalizeAudio', normalizeAudio.checked);
+  });
+}
+
+// Update download link extension based on selected format
+function updateDownloadLinkExtension() {
+  const format = outputFormat.value;
+  if (downloadLink.download) {
+    downloadLink.download = `mixed_audio.${format}`;
+  }
+}
+
 // Check for SharedArrayBuffer support
 function checkSharedArrayBufferSupport() {
   try {
@@ -160,6 +221,11 @@ mixButton.addEventListener('click', async () => {
     const mainExt = result.mainAudioFormat;
     const bgExt = result.bgAudioFormat;
 
+    // Get selected output format from settings
+    const format = outputFormat.value;
+    const quality = outputQuality.value;
+    const normalize = normalizeAudio.checked;
+
     // Write files to ffmpeg virtual filesystem
     log('Writing files to FFmpeg virtual filesystem...');
     ffmpeg.FS('writeFile', `main.${mainExt}`, new Uint8Array(mainFileData));
@@ -170,21 +236,37 @@ mixButton.addEventListener('click', async () => {
     const files = ffmpeg.FS('readdir', '/');
     log(files.join(', '));
 
-    // Parse the command - properly handle the filter_complex part which has quotes
-    log('Original FFmpeg command: ' + result.command);
-
     // Manually construct the command array to ensure proper handling of complex filters
     let commandArray = [];
 
     // Input files
     commandArray.push('-i', `main.${mainExt}`, '-i', `bg.${bgExt}`);
 
-    // Filter complex (without surrounding quotes)
-    const filterComplex = `[1:a]volume=${volumeControl.value}[bg];[0:a][bg]amix=inputs=2:duration=longest:dropout_transition=2`;
+    // Filter complex with normalization if enabled
+    let filterComplex = `[1:a]volume=${volumeControl.value}[bg];`;
+
+    if (normalize) {
+      filterComplex += `[0:a]dynaudnorm[a0norm];[bg]dynaudnorm[bgnorm];[a0norm][bgnorm]`;
+    } else {
+      filterComplex += `[0:a][bg]`;
+    }
+
+    filterComplex += `amix=inputs=2:duration=longest:dropout_transition=2`;
+
     commandArray.push('-filter_complex', filterComplex);
 
-    // Output options
-    commandArray.push('-c:a', 'libmp3lame', '-q:a', '2', 'output.mp3');
+    // Output options based on format
+    const outputFilename = `output.${format}`;
+
+    if (format === 'mp3') {
+      commandArray.push('-c:a', 'libmp3lame', '-q:a', quality);
+    } else if (format === 'ogg') {
+      commandArray.push('-c:a', 'libvorbis', '-q:a', quality);
+    } else if (format === 'wav') {
+      commandArray.push('-c:a', 'pcm_s16le');
+    }
+
+    commandArray.push(outputFilename);
 
     log('Executing FFmpeg command with arguments: ' + commandArray.join(' '));
 
@@ -197,22 +279,28 @@ mixButton.addEventListener('click', async () => {
     log(filesAfter.join(', '));
 
     // Check if output file exists
-    if (!filesAfter.includes('output.mp3')) {
+    if (!filesAfter.includes(outputFilename)) {
       throw new Error('Output file was not created. FFmpeg command may have failed.');
     }
 
     // Read the result
     log('Processing complete, reading output file...');
-    const data = ffmpeg.FS('readFile', 'output.mp3');
+    const data = ffmpeg.FS('readFile', outputFilename);
 
     // Create a blob and URL
-    const blob = new Blob([data.buffer], { type: 'audio/mp3' });
+    const mimeTypes = {
+      'mp3': 'audio/mp3',
+      'wav': 'audio/wav',
+      'ogg': 'audio/ogg'
+    };
+
+    const blob = new Blob([data.buffer], { type: mimeTypes[format] || 'audio/mp3' });
     const url = URL.createObjectURL(blob);
 
     // Update UI with the result
     resultAudio.src = url;
     downloadLink.href = url;
-    downloadLink.download = 'mixed_audio.mp3';
+    downloadLink.download = `mixed_audio.${format}`;
     resultContainer.style.display = 'block';
 
     log('Audio mixing completed successfully!');
@@ -245,6 +333,9 @@ function readFileAsArrayBuffer(file) {
 
 // Initialize
 async function init() {
+  // Initialize settings first
+  initSettings();
+
   const wasmLoaded = await initWasm();
   const ffmpegLoaded = await initFFmpeg();
 
