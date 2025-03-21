@@ -3,7 +3,7 @@ function log(message) {
   console.log(`[App] ${message}`);
 
   // Add to log container if it exists
-  const logContainer = document.getElementById('logContainer');
+  const logContainer = document.getElementById('logs');
   if (logContainer) {
     const logEntry = document.createElement('div');
     logEntry.className = 'log-entry';
@@ -25,6 +25,8 @@ async function processForm() {
   if (window.debugSystem) {
     window.debugSystem.log.info('system', 'Processing form submission');
   }
+
+  log("Process form triggered");
 
   // Get selected mode
   const isVideoMode = document.getElementById('videoWithImagesRadio').checked;
@@ -108,7 +110,7 @@ async function createVideoWithImages() {
   }
 
   // Check if we have images
-  if (imageFiles.length === 0) {
+  if (typeof imageFiles === 'undefined' || imageFiles.length === 0) {
     log('Please add at least one image');
     return;
   }
@@ -279,10 +281,14 @@ async function init() {
       log("initVideoUI function not found");
     }
 
-    // Initialize FFmpeg
-    log("Calling initFFmpeg()");
-    const ffmpegLoaded = await initFFmpeg();
-    log("initFFmpeg() completed, result: " + ffmpegLoaded);
+    // Initialize FFmpeg (check if it exists first)
+    if (typeof initFFmpeg === 'function') {
+      log("Calling initFFmpeg()");
+      const ffmpegLoaded = await initFFmpeg();
+      log("initFFmpeg() completed, result: " + ffmpegLoaded);
+    } else {
+      log("initFFmpeg function not found, skipping");
+    }
 
     // Initialize WASM
     if (typeof initWasm === 'function') {
@@ -296,8 +302,14 @@ async function init() {
     // Add event listener to mix button
     const mixButton = document.getElementById('mixButton');
     if (mixButton) {
+      // Remove any existing event listeners to prevent duplicates
+      mixButton.removeEventListener('click', processForm);
+      // Add fresh event listener
       mixButton.addEventListener('click', processForm);
       log("Added event listener to mix button");
+
+      // Enable the button if both audio files are selected
+      checkFilesLoaded();
     } else {
       log("Mix button not found");
     }
@@ -306,11 +318,13 @@ async function init() {
     const audioOnlyRadio = document.getElementById('audioOnlyRadio');
     const videoWithImagesRadio = document.getElementById('videoWithImagesRadio');
     const imageUploadsContainer = document.getElementById('imageUploadsContainer');
+    const videoSettingsContainer = document.getElementById('videoSettingsContainer');
 
     if (audioOnlyRadio && videoWithImagesRadio && imageUploadsContainer) {
       audioOnlyRadio.addEventListener('change', function () {
         if (this.checked) {
           imageUploadsContainer.style.display = 'none';
+          if (videoSettingsContainer) videoSettingsContainer.style.display = 'none';
           log("Switched to audio-only mode");
         }
       });
@@ -318,6 +332,7 @@ async function init() {
       videoWithImagesRadio.addEventListener('change', function () {
         if (this.checked) {
           imageUploadsContainer.style.display = 'block';
+          if (videoSettingsContainer) videoSettingsContainer.style.display = 'block';
           log("Switched to video with images mode");
         }
       });
@@ -325,6 +340,12 @@ async function init() {
       log("Added event listeners to mode radio buttons");
     } else {
       log("Mode radio buttons or image uploads container not found");
+    }
+
+    // Ensure imageFiles is defined
+    if (typeof window.imageFiles === 'undefined') {
+      window.imageFiles = [];
+      log("Initialized imageFiles array");
     }
 
     // Mark initialization as complete
@@ -338,6 +359,34 @@ async function init() {
   }
 }
 
+// Function to check if files are loaded and enable/disable mix button
+function checkFilesLoaded() {
+  const mainAudioInput = document.getElementById('mainAudio');
+  const bgAudioInput = document.getElementById('bgAudio');
+  const mixButton = document.getElementById('mixButton');
+
+  if (!mainAudioInput || !bgAudioInput || !mixButton) {
+    log("Required elements not found for checkFilesLoaded");
+    return;
+  }
+
+  const mainAudioFile = mainAudioInput.files[0];
+  const bgAudioFile = bgAudioInput.files[0];
+
+  if (mainAudioFile && bgAudioFile) {
+    mixButton.disabled = false;
+    log("Mix button enabled - files loaded");
+    if (window.debugSystem) {
+      window.debugSystem.log.debug('ui', 'Mix button enabled - files loaded');
+    }
+  } else {
+    mixButton.disabled = true;
+    if (window.debugSystem) {
+      window.debugSystem.log.debug('ui', 'Mix button disabled - not all files loaded');
+    }
+  }
+}
+
 // Export functions to global scope
 window.log = log;
 window.init = init;
@@ -347,6 +396,45 @@ window.processForm = processForm;
 window.readFileAsDataURL = readFileAsDataURL;
 window.readBlobAsDataURL = readBlobAsDataURL;
 window.updateUIWithResult = updateUIWithResult;
+window.checkFilesLoaded = checkFilesLoaded;
 
 // Log that script.js has loaded
 console.log('script.js loaded and functions exported to global scope');
+
+// Add event listeners for file inputs to enable/disable mix button
+document.addEventListener('DOMContentLoaded', function () {
+  const mainAudioInput = document.getElementById('mainAudio');
+  const bgAudioInput = document.getElementById('bgAudio');
+
+  if (mainAudioInput) {
+    mainAudioInput.addEventListener('change', checkFilesLoaded);
+    if (window.debugSystem) {
+      window.debugSystem.log.debug('ui', 'Added change listener to main audio input');
+    }
+  }
+
+  if (bgAudioInput) {
+    bgAudioInput.addEventListener('change', checkFilesLoaded);
+    if (window.debugSystem) {
+      window.debugSystem.log.debug('ui', 'Added change listener to background audio input');
+    }
+  }
+
+  // Check if mix button exists and initialize it
+  const mixButton = document.getElementById('mixButton');
+  if (mixButton) {
+    // Add click event listener directly here as a backup
+    mixButton.addEventListener('click', function () {
+      log("Mix button clicked (from DOMContentLoaded listener)");
+      if (typeof window.processForm === 'function') {
+        window.processForm();
+      } else {
+        log("Error: processForm function not available");
+      }
+    });
+
+    if (window.debugSystem) {
+      window.debugSystem.log.debug('ui', 'Added backup click listener to mix button');
+    }
+  }
+});
