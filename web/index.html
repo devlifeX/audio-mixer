@@ -8,6 +8,10 @@
     <!-- Import FFmpeg WASM libraries - newer version with better compatibility -->
     <script src="https://cdn.jsdelivr.net/npm/@ffmpeg/ffmpeg@0.11.6/dist/ffmpeg.min.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/@ffmpeg/util@0.12.1/dist/index.min.js"></script>
+    <!-- Import wasm_exec.js for Go WASM support -->
+    <script src="wasm_exec.js"></script>
+    <!-- Import our main script as a module -->
+    <script type="module" src="script.js"></script>
   </head>
   <body>
     <div class="container">
@@ -64,6 +68,30 @@
             Normalize audio levels
           </label>
         </div>
+        <!-- Duration setting -->
+        <div class="setting-item">
+          <label for="outputDuration">Output Duration:</label>
+          <select id="outputDuration">
+            <option value="shortest">Shortest Input</option>
+            <option value="longest" selected>Longest Input</option>
+            <option value="main">Main Audio Length</option>
+            <option value="bg">Background Audio Length</option>
+            <option value="custom">Custom Duration (seconds)</option>
+          </select>
+          <div
+            id="customDurationContainer"
+            style="display: none; margin-top: 8px"
+          >
+            <input
+              type="number"
+              id="customDurationValue"
+              min="1"
+              step="1"
+              value="60"
+              style="width: 100%"
+            />
+          </div>
+        </div>
       </div>
 
       <div class="file-inputs">
@@ -114,8 +142,5 @@
 
       <div class="logs" id="logs"></div>
     </div>
-
-    <script src="wasm_exec.js"></script>
-    <script src="script.js"></script>
   </body>
 </html>

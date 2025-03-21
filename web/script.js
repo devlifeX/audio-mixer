@@ -1,85 +1,16 @@
+// Main script file - handles initialization and orchestration
+
+// Import our modules
+import { initWasm, mixAudioWithWasm } from './wasm.js';
+import { initUI, updateUI, log } from './ui.js';
+import { initSettings, getSettings } from './settings.js';
+
 // Initialize variables
 let mainAudioFile = null;
 let bgAudioFile = null;
 let ffmpeg = null;
-
-// DOM elements
-const mainAudioInput = document.getElementById('mainAudio');
-const bgAudioInput = document.getElementById('bgAudio');
-const mainAudioPlayer = document.getElementById('mainAudioPlayer');
-const bgAudioPlayer = document.getElementById('bgAudioPlayer');
-const volumeControl = document.getElementById('volumeControl');
-const volumeValue = document.getElementById('volumeValue');
-const mixButton = document.getElementById('mixButton');
-const progressContainer = document.querySelector('.progress-container');
-const progressBar = document.getElementById('progressBar');
-const progressText = document.getElementById('progressText');
-const resultContainer = document.getElementById('resultContainer');
-const resultAudio = document.getElementById('resultAudio');
-const downloadLink = document.getElementById('downloadLink');
-const logsElement = document.getElementById('logs');
-const sabWarning = document.getElementById('sabWarning');
-
-// Settings elements
-const settingsToggle = document.getElementById('settingsToggle');
-const settingsPanel = document.getElementById('settingsPanel');
-const outputFormat = document.getElementById('outputFormat');
-const outputQuality = document.getElementById('outputQuality');
-const normalizeAudio = document.getElementById('normalizeAudio');
-
-// Settings management
-function initSettings() {
-  // Load settings panel state from localStorage
-  const isPanelHidden = localStorage.getItem('settingsPanelHidden') === 'true';
-
-  // Apply initial state
-  if (isPanelHidden) {
-    settingsPanel.classList.add('hidden');
-  } else {
-    settingsPanel.classList.remove('hidden');
-  }
-
-  // Toggle settings panel visibility
-  settingsToggle.addEventListener('click', () => {
-    const isHidden = settingsPanel.classList.toggle('hidden');
-    localStorage.setItem('settingsPanelHidden', isHidden);
-  });
-
-  // Load saved settings values if they exist
-  if (localStorage.getItem('outputFormat')) {
-    outputFormat.value = localStorage.getItem('outputFormat');
-  }
-
-  if (localStorage.getItem('outputQuality')) {
-    outputQuality.value = localStorage.getItem('outputQuality');
-  }
-
-  if (localStorage.getItem('normalizeAudio') !== null) {
-    normalizeAudio.checked = localStorage.getItem('normalizeAudio') === 'true';
-  }
-
-  // Save settings when changed
-  outputFormat.addEventListener('change', () => {
-    localStorage.setItem('outputFormat', outputFormat.value);
-    updateDownloadLinkExtension();
-  });
-
-  outputQuality.addEventListener('change', () => {
-    localStorage.setItem('outputQuality', outputQuality.value);
-  });
-
-  normalizeAudio.addEventListener('change', () => {
-    localStorage.setItem('normalizeAudio', normalizeAudio.checked);
-  });
-}
-
-// Update download link extension based on selected format
-function updateDownloadLinkExtension() {
-  const format = outputFormat.value;
-  if (downloadLink.download) {
-    downloadLink.download = `mixed_audio.${format}`;
-  }
-}
+let mainAudioDuration = 0;
+let bgAudioDuration = 0;
 
 // Check for SharedArrayBuffer support
 function checkSharedArrayBufferSupport() {
@@ -92,27 +23,12 @@ function checkSharedArrayBufferSupport() {
   }
 }
 
-// Load WASM
-async function initWasm() {
-  const go = new Go();
-  try {
-    const result = await WebAssembly.instantiateStreaming(fetch('main.wasm'), go.importObject);
-    go.run(result.instance);
-    log('WASM loaded successfully');
-    return true;
-  } catch (err) {
-    log('Error loading WASM: ' + err);
-    console.error(err);
-    return false;
-  }
-}
-
 // Initialize ffmpeg
 async function initFFmpeg() {
   try {
     // Check for SharedArrayBuffer support
     if (!checkSharedArrayBufferSupport()) {
-      sabWarning.style.display = 'block';
+      document.getElementById('sabWarning').style.display = 'block';
       log('Error: SharedArrayBuffer is not supported in your browser or context.');
       log('Make sure you are using HTTPS or localhost, and have the appropriate headers set.');
       return false;
@@ -136,8 +52,7 @@ async function initFFmpeg() {
       },
       progress: ({ ratio }) => {
         const percent = Math.floor(ratio * 100);
-        progressBar.style.width = `${percent}%`;
-        progressText.textContent = `Processing: ${percent}%`;
+        updateUI.progressBar(percent);
       },
       corePath: 'https://cdn.jsdelivr.net/npm/@ffmpeg/core@0.11.0/dist/ffmpeg-core.js'
     });
@@ -152,56 +67,81 @@ async function initFFmpeg() {
     return false;
   }
 }
-
-// Log function
-function log(message) {
-  console.log(message);
-  logsElement.innerHTML += `${message}<br>`;
-  logsElement.scrollTop = logsElement.scrollHeight;
+// Get audio duration
+function getAudioDuration(audioElement) {
+  return new Promise((resolve) => {
+    if (audioElement.readyState > 0) {
+      resolve(audioElement.duration);
+    } else {
+      audioElement.addEventListener('loadedmetadata', () => {
+        resolve(audioElement.duration);
+      });
+    }
+  });
 }
 
-// File input handlers
-mainAudioInput.addEventListener('change', (e) => {
-  if (e.target.files.length > 0) {
-    mainAudioFile = e.target.files[0];
-    mainAudioPlayer.src = URL.createObjectURL(mainAudioFile);
-    mainAudioPlayer.style.display = 'block';
-    checkFilesLoaded();
-    log(`Main audio loaded: ${mainAudioFile.name}`);
-  }
-});
-
-bgAudioInput.addEventListener('change', (e) => {
-  if (e.target.files.length > 0) {
-    bgAudioFile = e.target.files[0];
-    bgAudioPlayer.src = URL.createObjectURL(bgAudioFile);
-    bgAudioPlayer.style.display = 'block';
-    checkFilesLoaded();
-    log(`Background audio loaded: ${bgAudioFile.name}`);
-  }
-});
-
-// Volume control
-volumeControl.addEventListener('input', () => {
-  volumeValue.textContent = volumeControl.value;
-});
+// Format duration in MM:SS format
+function formatDuration(seconds) {
+  const mins = Math.floor(seconds / 60);
+  const secs = Math.floor(seconds % 60);
+  return `${mins}:${secs.toString().padStart(2, '0')}`;
+}
 
 // Check if both files are loaded to enable the mix button
 function checkFilesLoaded() {
+  const mixButton = document.getElementById('mixButton');
   mixButton.disabled = !(mainAudioFile && bgAudioFile && ffmpeg && ffmpeg.isLoaded());
 }
 
+// Get the desired output duration based on settings
+function getOutputDuration() {
+  const settings = getSettings();
+  switch (settings.outputDuration) {
+    case 'shortest':
+      return Math.min(mainAudioDuration, bgAudioDuration);
+    case 'longest':
+      return Math.max(mainAudioDuration, bgAudioDuration);
+    case 'main':
+      return mainAudioDuration;
+    case 'bg':
+      return bgAudioDuration;
+    case 'custom':
+      return parseFloat(settings.customDurationValue);
+    default:
+      return Math.max(mainAudioDuration, bgAudioDuration); // Default to longest
+  }
+}
+
+// Helper functions
+function readFileAsDataURL(file) {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () => resolve(reader.result);
+    reader.onerror = reject;
+    reader.readAsDataURL(file);
+  });
+}
+
+function readFileAsArrayBuffer(file) {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () => resolve(reader.result);
+    reader.onerror = reject;
+    reader.readAsArrayBuffer(file);
+  });
+}
+
 // Mix audio files
-mixButton.addEventListener('click', async () => {
+async function mixAudio() {
   if (!mainAudioFile || !bgAudioFile) {
     log('Please select both audio files');
     return;
   }
 
   try {
+    const mixButton = document.getElementById('mixButton');
     mixButton.disabled = true;
-    progressContainer.style.display = 'block';
-    resultContainer.style.display = 'none';
+    updateUI.showProgress();
 
     log('Starting audio mixing process...');
 
@@ -209,9 +149,17 @@ mixButton.addEventListener('click', async () => {
     const mainAudioData = await readFileAsDataURL(mainAudioFile);
     const bgAudioData = await readFileAsDataURL(bgAudioFile);
 
+    // Get the desired output duration
+    const duration = getOutputDuration();
+    log(`Output duration set to: ${formatDuration(duration)} seconds`);
+
+    // Get volume from UI
+    const volumeControl = document.getElementById('volumeControl');
+    const volume = parseFloat(volumeControl.value);
+
     // Call WASM function to get the ffmpeg command and format info
     log('Processing file information with WASM...');
-    const result = await mixAudio(mainAudioData, bgAudioData, parseFloat(volumeControl.value));
+    const result = await mixAudioWithWasm(mainAudioData, bgAudioData, volume, duration);
 
     // Read files as array buffers
     const mainFileData = await readFileAsArrayBuffer(mainAudioFile);
@@ -222,9 +170,10 @@ mixButton.addEventListener('click', async () => {
     const bgExt = result.bgAudioFormat;
 
     // Get selected output format from settings
-    const format = outputFormat.value;
-    const quality = outputQuality.value;
-    const normalize = normalizeAudio.checked;
+    const settings = getSettings();
+    const format = settings.outputFormat;
+    const quality = settings.outputQuality;
+    const normalize = settings.normalizeAudio;
 
     // Write files to ffmpeg virtual filesystem
     log('Writing files to FFmpeg virtual filesystem...');
@@ -242,8 +191,13 @@ mixButton.addEventListener('click', async () => {
     // Input files
     commandArray.push('-i', `main.${mainExt}`, '-i', `bg.${bgExt}`);
 
+    // Add duration parameter if needed
+    if (settings.outputDuration !== 'longest') {
+      commandArray.push('-t', duration.toString());
+    }
+
     // Filter complex with normalization if enabled
-    let filterComplex = `[1:a]volume=${volumeControl.value}[bg];`;
+    let filterComplex = `[1:a]volume=${volume}[bg];`;
 
     if (normalize) {
       filterComplex += `[0:a]dynaudnorm[a0norm];[bg]dynaudnorm[bgnorm];[a0norm][bgnorm]`;
@@ -251,7 +205,23 @@ mixButton.addEventListener('click', async () => {
       filterComplex += `[0:a][bg]`;
     }
 
-    filterComplex += `amix=inputs=2:duration=longest:dropout_transition=2`;
+    // Use the duration mode from the settings
+    let durationMode = "longest";
+    switch (settings.outputDuration) {
+      case 'shortest':
+        durationMode = "shortest";
+        break;
+      case 'main':
+      case 'bg':
+      case 'custom':
+        // For these modes, we use the -t parameter instead
+        durationMode = "longest";
+        break;
+      default:
+        durationMode = "longest";
+    }
+
+    filterComplex += `amix=inputs=2:duration=${durationMode}:dropout_transition=2`;
 
     commandArray.push('-filter_complex', filterComplex);
 
@@ -298,44 +268,72 @@ mixButton.addEventListener('click', async () => {
     const url = URL.createObjectURL(blob);
 
     // Update UI with the result
-    resultAudio.src = url;
-    downloadLink.href = url;
-    downloadLink.download = `mixed_audio.${format}`;
-    resultContainer.style.display = 'block';
+    updateUI.showResult(url, format);
 
     log('Audio mixing completed successfully!');
   } catch (err) {
     log('Error during mixing: ' + err);
     console.error(err);
   } finally {
-    mixButton.disabled = false;
+    document.getElementById('mixButton').disabled = false;
   }
-});
-
-// Helper functions
-function readFileAsDataURL(file) {
-  return new Promise((resolve, reject) => {
-    const reader = new FileReader();
-    reader.onload = () => resolve(reader.result);
-    reader.onerror = reject;
-    reader.readAsDataURL(file);
-  });
 }
 
-function readFileAsArrayBuffer(file) {
-  return new Promise((resolve, reject) => {
-    const reader = new FileReader();
-    reader.onload = () => resolve(reader.result);
-    reader.onerror = reject;
-    reader.readAsArrayBuffer(file);
+// Set up file input handlers
+function setupFileInputs() {
+  const mainAudioInput = document.getElementById('mainAudio');
+  const bgAudioInput = document.getElementById('bgAudio');
+  const mainAudioPlayer = document.getElementById('mainAudioPlayer');
+  const bgAudioPlayer = document.getElementById('bgAudioPlayer');
+
+  mainAudioInput.addEventListener('change', async (e) => {
+    if (e.target.files.length > 0) {
+      mainAudioFile = e.target.files[0];
+      mainAudioPlayer.src = URL.createObjectURL(mainAudioFile);
+      mainAudioPlayer.style.display = 'block';
+
+      // Get the duration of the main audio
+      mainAudioDuration = await getAudioDuration(mainAudioPlayer);
+      log(`Main audio loaded: ${mainAudioFile.name} (${formatDuration(mainAudioDuration)})`);
+
+      checkFilesLoaded();
+    }
   });
+
+  bgAudioInput.addEventListener('change', async (e) => {
+    if (e.target.files.length > 0) {
+      bgAudioFile = e.target.files[0];
+      bgAudioPlayer.src = URL.createObjectURL(bgAudioFile);
+      bgAudioPlayer.style.display = 'block';
+
+      // Get the duration of the background audio
+      bgAudioDuration = await getAudioDuration(bgAudioPlayer);
+      log(`Background audio loaded: ${bgAudioFile.name} (${formatDuration(bgAudioDuration)})`);
+
+      checkFilesLoaded();
+    }
+  });
+
+  // Volume control
+  const volumeControl = document.getElementById('volumeControl');
+  const volumeValue = document.getElementById('volumeValue');
+  volumeControl.addEventListener('input', () => {
+    volumeValue.textContent = volumeControl.value;
+  });
+
+  // Mix button
+  const mixButton = document.getElementById('mixButton');
+  mixButton.addEventListener('click', mixAudio);
 }
 
 // Initialize
 async function init() {
-  // Initialize settings first
+  // Initialize UI and settings first
+  initUI();
   initSettings();
+  setupFileInputs();
 
+  // Initialize WASM and FFmpeg
   const wasmLoaded = await initWasm();
   const ffmpegLoaded = await initFFmpeg();
 
@@ -349,4 +347,7 @@ async function init() {
 }
 
 // Start initialization when the page loads
-init();
+document.addEventListener('DOMContentLoaded', init);
+
+// Export functions that might be needed by other modules
+export { log, formatDuration };

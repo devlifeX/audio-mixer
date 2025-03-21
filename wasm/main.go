@@ -22,13 +22,20 @@ func main() {
 
 // mixAudio takes two audio files and mixes them, with the second as background music
 func mixAudio(this js.Value, args []js.Value) interface{} {
-	if len(args) != 3 {
-		return errorResult("Expected 3 arguments: mainAudioData, bgAudioData, and volume")
+	// Check if we have the right number of arguments (now 4 with duration)
+	if len(args) < 3 || len(args) > 4 {
+		return errorResult("Expected 3-4 arguments: mainAudioData, bgAudioData, volume, and optional duration")
 	}
 
 	mainAudioBase64 := args[0].String()
 	bgAudioBase64 := args[1].String()
 	volume := args[2].Float()
+
+	// Get duration if provided, otherwise use 0 (which means use default duration)
+	var duration float64 = 0
+	if len(args) >= 4 && !args[3].IsUndefined() && !args[3].IsNull() {
+		duration = args[3].Float()
+	}
 
 	// Create a promise to return to JavaScript
 	promiseConstructor := js.Global().Get("Promise")
@@ -58,7 +65,7 @@ func mixAudio(this js.Value, args []js.Value) interface{} {
 			}
 
 			// Create the ffmpeg command for mixing
-			command := buildFFmpegCommand(mainFormat, bgFormat, volume)
+			command := buildFFmpegCommand(mainFormat, bgFormat, volume, duration)
 
 			// Return an object with the command and file data
 			result := map[string]interface{}{
@@ -68,6 +75,7 @@ func mixAudio(this js.Value, args []js.Value) interface{} {
 				"bgAudioData":     bgData,
 				"bgAudioFormat":   bgFormat,
 				"volume":          volume,
+				"duration":        duration,
 			}
 
 			resolve.Invoke(js.ValueOf(result))
@@ -125,19 +133,27 @@ func parseBase64Data(dataUrl string) (string, string, error) {
 }
 
 // buildFFmpegCommand creates the appropriate FFmpeg command for mixing the audio files
-func buildFFmpegCommand(mainFormat, bgFormat string, volume float64) string {
+// Now with duration parameter
+func buildFFmpegCommand(mainFormat, bgFormat string, volume float64, duration float64) string {
 	// Create a complex FFmpeg command that:
 	// 1. Takes both input files
 	// 2. Adjusts the volume of the background audio
 	// 3. Mixes the two audio streams
 	// 4. Encodes the result as MP3
 
+	// Base command
+	command := fmt.Sprintf("-i main.%s -i bg.%s", mainFormat, bgFormat)
+
+	// Add duration if specified
+	if duration > 0 {
+		command += fmt.Sprintf(" -t %.2f", duration)
+	}
+
 	// Build filter complex for audio mixing
 	filterComplex := fmt.Sprintf("[1:a]volume=%.2f[bg];[0:a][bg]amix=inputs=2:duration=longest:dropout_transition=2", volume)
 
-	// Full command with input files, filter complex, and output format
-	command := fmt.Sprintf("-i main.%s -i bg.%s -filter_complex \"%s\" -c:a libmp3lame -q:a 2 output.mp3",
-		mainFormat, bgFormat, filterComplex)
+	// Add filter complex and output options
+	command += fmt.Sprintf(" -filter_complex \"%s\" -c:a libmp3lame -q:a 2 output.mp3", filterComplex)
 
 	return command
 }
