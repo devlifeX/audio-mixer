@@ -86,18 +86,16 @@ async function mixAudioWithWasm(mainAudioData, bgAudioData, volume, duration) {
   }
 }
 
-// Call the WASM createVideo function
 async function createVideoWithWasm(audioData, imageDataArray, settings) {
   if (window.debugSystem) {
     window.debugSystem.log.info('wasm', 'Calling createVideo WASM function', {
-      audioDataLength: audioData ? audioData.substring(0, 50) + '...' : 'null',
+      audioDataLength: audioData ? audioData.byteLength : 0,
       imageDataArrayLength: imageDataArray ? imageDataArray.length : 0,
-      settings
+      settings,
     });
   }
 
   try {
-    // Check if the global createVideo function from WASM is available
     if (typeof window.createVideo !== 'function') {
       const error = 'WASM createVideo function not available. Make sure WASM is properly loaded.';
       if (window.debugSystem) {
@@ -106,14 +104,16 @@ async function createVideoWithWasm(audioData, imageDataArray, settings) {
       throw new Error(error);
     }
 
-    // Call the WASM function with the provided parameters
-    const result = await window.createVideo(audioData, imageDataArray, settings);
+    // Call the WASM function
+    const videoArrayBuffer = await window.createVideo(audioData, imageDataArray, settings);
 
     if (window.debugSystem) {
-      window.debugSystem.log.info('wasm', 'createVideo WASM function returned result', result);
+      window.debugSystem.log.info('wasm', 'createVideo WASM function returned result');
     }
 
-    return result;
+    // Convert ArrayBuffer to Blob
+    const videoBlob = new Blob([videoArrayBuffer], { type: `video/${settings.videoFormat}` });
+    return videoBlob;
   } catch (err) {
     if (window.debugSystem) {
       window.debugSystem.log.error('wasm', 'Error calling WASM createVideo function:', err);
