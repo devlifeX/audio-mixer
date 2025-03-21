@@ -1,118 +1,111 @@
+//go:build js && wasm
+// +build js,wasm
+
 package main
 
 import (
-	"encoding/json"
+	"encoding/base64"
 	"fmt"
-	"syscall/js"
+	"io/ioutil"
+	"os"
+	"path/filepath"
+	"strings"
 )
 
-// VideoSettings represents the settings for video creation
-type VideoSettings struct {
-	Width    int     `json:"width"`
-	Height   int     `json:"height"`
-	Format   string  `json:"format"`
-	Quality  string  `json:"quality"`
-	Duration float64 `json:"duration"`
-}
+// processVideoCreation processes the video creation using FFmpeg
+func processVideoCreation(audioData string, imageDataArray []ImageData, settings VideoSettings) ([]byte, error) {
+	// Create temporary directory
+	tempDir, err := ioutil.TempDir("", "video-creation")
+	if err != nil {
+		return nil, fmt.Errorf("failed to create temp directory: %w", err)
+	}
+	defer os.RemoveAll(tempDir)
 
-// ImageData represents an image with its duration
-type ImageData struct {
-	Data     string  `json:"data"`
-	Duration float64 `json:"duration"`
-}
+	// Extract audio format and data
+	audioParts := strings.SplitN(audioData, ";base64,", 2)
+	if len(audioParts) != 2 {
+		return nil, fmt.Errorf("invalid audio data format")
+	}
+	audioBytes, err := base64.StdEncoding.DecodeString(audioParts[1])
+	if err != nil {
+		return nil, fmt.Errorf("failed to decode audio data: %w", err)
+	}
 
-// Register the createVideo function
-func registerVideoFunctions() {
-	js.Global().Set("createVideo", js.FuncOf(createVideo))
-}
+	// Write audio file to disk
+	audioPath := filepath.Join(tempDir, "mixed_audio.mp3")
+	if err := ioutil.WriteFile(audioPath, audioBytes, 0644); err != nil {
+		return nil, fmt.Errorf("failed to write audio file: %w", err)
+	}
 
-// createVideo creates a video from audio and images
-func createVideo(this js.Value, args []js.Value) interface{} {
-	// Create a promise
-	promiseConstructor := js.Global().Get("Promise")
-	return promiseConstructor.New(js.FuncOf(func(this js.Value, promiseArgs []js.Value) interface{} {
-		resolve := promiseArgs[0]
-		reject := promiseArgs[1]
+	// Process images
+	updateProgress(10)
 
-		// Check arguments
-		if len(args) < 3 {
-			reject.Invoke("Not enough arguments. Expected audio data, image data array, and settings.")
-			return nil
+	// Write images to disk and create concat file
+	concatFilePath := filepath.Join(tempDir, "concat.txt")
+	concatFile, err := os.Create(concatFilePath)
+	if err != nil {
+		return nil, fmt.Errorf("failed to create concat file: %w", err)
+	}
+
+	for i, imageData := range imageDataArray {
+		// Extract image data
+		imageParts := strings.SplitN(imageData.Data, ";base64,", 2)
+		if len(imageParts) != 2 {
+			return nil, fmt.Errorf("invalid image data format for image %d", i)
 		}
-
-		// We're not using audioData directly in this function, but we'll include it in the result
-		audioData := args[0].String()
-		imagesArray := args[1]
-		settingsObj := args[2]
-
-		// Parse settings
-		var settings VideoSettings
-		settingsMap := make(map[string]interface{})
-
-		keys := js.Global().Get("Object").Call("keys", settingsObj)
-		for i := 0; i < keys.Length(); i++ {
-			key := keys.Index(i).String()
-			value := settingsObj.Get(key)
-
-			// Handle different types of values
-			switch key {
-			case "width", "height":
-				settingsMap[key] = value.Int()
-			case "duration":
-				settingsMap[key] = value.Float()
-			default:
-				settingsMap[key] = value.String()
-			}
-		}
-
-		// Convert settings map to JSON and then to struct
-		settingsJSON, err := json.Marshal(settingsMap)
+		imageBytes, err := base64.StdEncoding.DecodeString(imageParts[1])
 		if err != nil {
-			reject.Invoke(fmt.Sprintf("Failed to parse settings: %v", err))
-			return nil
+			return nil, fmt.Errorf("failed to decode image data for image %d: %w", i, err)
 		}
 
-		err = json.Unmarshal(settingsJSON, &settings)
-		if err != nil {
-			reject.Invoke(fmt.Sprintf("Failed to parse settings: %v", err))
-			return nil
+		// Write image to disk
+		imagePath := filepath.Join(tempDir, fmt.Sprintf("image_%d.jpg", i))
+		if err := ioutil.WriteFile(imagePath, imageBytes, 0644); err != nil {
+			return nil, fmt.Errorf("failed to write image file for image %d: %w", i, err)
 		}
 
-		// Parse images
-		var images []ImageData
-		for i := 0; i < imagesArray.Length(); i++ {
-			imgObj := imagesArray.Index(i)
-			img := ImageData{
-				Data:     imgObj.Get("data").String(),
-				Duration: imgObj.Get("duration").Float(),
-			}
-			images = append(images, img)
-		}
+		// Add to concat file
+		fmt.Fprintf(concatFile, "file '%s'\n", imagePath)
+		fmt.Fprintf(concatFile, "duration %.1f\n", imageData.Duration)
 
-		// Generate FFmpeg command for video creation
-		command := buildVideoCommand(settings, len(images))
+		// Update progress
+		progress := 10 + (i+1)*40/len(imageDataArray)
+		updateProgress(progress)
+	}
 
-		// Create result object
-		result := make(map[string]interface{})
-		result["command"] = command
-		result["imageCount"] = len(images)
-		result["totalDuration"] = settings.Duration
-		result["width"] = settings.Width
-		result["height"] = settings.Height
-		result["audioIncluded"] = len(audioData) > 0 // Use audioData in the result
+	// Close concat file
+	concatFile.Close()
 
-		// Convert result to JS object
-		resultJS := js.Global().Get("Object").New()
-		for k, v := range result {
-			resultJS.Set(k, v)
-		}
+	// Build FFmpeg command for video creation
+	command := buildVideoCommand(settings, len(imageDataArray))
 
-		resolve.Invoke(resultJS)
-		return nil
-	}))
+	logDebug("ffmpeg", "Video command: %s", command)
+
+	// Execute FFmpeg command
+	updateProgress(50)
+
+	// This would be replaced with actual FFmpeg execution
+	// For now, we'll simulate progress
+	for i := 60; i <= 90; i += 10 {
+		// In a real implementation, this would be based on actual progress
+		updateProgress(i)
+		// Simulate processing time
+		// In real implementation, this would be removed
+	}
+
+	// Read the output file
+	updateProgress(95)
+	outputPath := filepath.Join(tempDir, "output."+settings.Format)
+	outputBytes, err := ioutil.ReadFile(outputPath)
+	if err != nil {
+		return nil, fmt.Errorf("failed to read output file: %w", err)
+	}
+
+	updateProgress(100)
+	return outputBytes, nil
 }
 
-// buildVideoCommand generates the FFmpeg command for creating a video from images and audio
+// buildVideoCommand builds the FFmpeg command for video creation
 func buildVideoCommand(settings VideoSettings, imageCount int) string {
 	// Base command for images to video
 	command := "-f concat -safe 0 -i concat.txt"
@@ -146,7 +139,7 @@ func buildVideoCommand(settings VideoSettings, imageCount int) string {
 		settings.Width, settings.Height, settings.Width, settings.Height)
 
 	// Output filename
-	command += " output.mp4"
+	command += fmt.Sprintf(" output.%s", settings.Format)
 
 	return command
 }

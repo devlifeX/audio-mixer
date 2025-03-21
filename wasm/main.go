@@ -1,180 +1,257 @@
+//go:build js && wasm
+// +build js,wasm
+
 package main
 
 import (
+	"encoding/json"
 	"fmt"
-	"strings"
 	"syscall/js"
 )
 
+// VideoSettings represents the settings for video creation
+type VideoSettings struct {
+	Width          int     `json:"width"`
+	Height         int     `json:"height"`
+	Quality        string  `json:"videoQuality"`
+	Format         string  `json:"videoFormat"`
+	OutputDuration string  `json:"outputDuration"`
+	CustomDuration float64 `json:"customDuration"`
+}
+
+// ImageData represents an image with its duration
+type ImageData struct {
+	Data     string  `json:"data"`
+	Duration float64 `json:"duration"`
+}
+
+// Global FFmpeg instance
+var ffmpeg js.Value
+
+// Main function - entry point for WASM
 func main() {
-	c := make(chan struct{}, 0)
+	// Set up channel to keep program running
+	c := make(chan struct{})
 
-	// Register our functions to be called from JavaScript
+	// Register functions to be called from JavaScript
 	js.Global().Set("mixAudio", js.FuncOf(mixAudio))
-	registerVideoFunctions()
+	js.Global().Set("createVideo", js.FuncOf(createVideo))
 
-	fmt.Println("WASM Audio/Video Mixer initialized")
+	// Log that WASM has been initialized
+	logInfo("WASM module initialized")
+
+	// Keep the program running
 	<-c
 }
 
-// mixAudio processes audio data and returns information needed for FFmpeg processing
+// logDebug logs debug messages to the JavaScript console and debug system
+func logDebug(category, message string, args ...interface{}) {
+	if len(args) > 0 {
+		message = fmt.Sprintf(message, args...)
+	}
+
+	// Log to console
+	js.Global().Get("console").Call("log", fmt.Sprintf("[WASM] [DEBUG] [%s] %s", category, message))
+
+	// Log to debug system if available
+	debugSystem := js.Global().Get("debugSystem")
+	if !debugSystem.IsUndefined() && !debugSystem.IsNull() {
+		log := debugSystem.Get("log")
+		if !log.IsUndefined() && !log.IsNull() {
+			debug := log.Get("debug")
+			if !debug.IsUndefined() && !debug.IsNull() {
+				debug.Invoke(category, message)
+			}
+		}
+	}
+}
+
+// logInfo logs info messages to the JavaScript console and debug system
+func logInfo(message string, args ...interface{}) {
+	if len(args) > 0 {
+		message = fmt.Sprintf(message, args...)
+	}
+
+	// Log to console
+	js.Global().Get("console").Call("log", fmt.Sprintf("[WASM] %s", message))
+
+	// Log to debug system if available
+	debugSystem := js.Global().Get("debugSystem")
+	if !debugSystem.IsUndefined() && !debugSystem.IsNull() {
+		log := debugSystem.Get("log")
+		if !log.IsUndefined() && !log.IsNull() {
+			info := log.Get("info")
+			if !info.IsUndefined() && !info.IsNull() {
+				info.Invoke("wasm", message)
+			}
+		}
+	}
+}
+
+// logError logs error messages to the JavaScript console and debug system
+func logError(message string, err error) {
+	errMsg := message
+	if err != nil {
+		errMsg = fmt.Sprintf("%s: %v", message, err)
+	}
+
+	// Log to console
+	js.Global().Get("console").Call("error", fmt.Sprintf("[WASM] ERROR: %s", errMsg))
+
+	// Log to debug system if available
+	debugSystem := js.Global().Get("debugSystem")
+	if !debugSystem.IsUndefined() && !debugSystem.IsNull() {
+		log := debugSystem.Get("log")
+		if !log.IsUndefined() && !log.IsNull() {
+			errorLog := log.Get("error")
+			if !errorLog.IsUndefined() && !errorLog.IsNull() {
+				errorLog.Invoke("wasm", errMsg)
+			}
+		}
+	}
+}
+
+// updateProgress updates the progress in the UI
+func updateProgress(percent int) {
+	// Update UI progress through JavaScript
+	js.Global().Get("console").Call("log", fmt.Sprintf("Progress: %d%%", percent))
+
+	// Call updateUI.progressBar if it exists
+	updateUI := js.Global().Get("updateUI")
+	if !updateUI.IsUndefined() && !updateUI.IsNull() {
+		progressBar := updateUI.Get("progressBar")
+		if !progressBar.IsUndefined() && !progressBar.IsNull() {
+			progressBar.Invoke(percent)
+		}
+	}
+}
+
+// mixAudio mixes two audio files with the second as background
 func mixAudio(this js.Value, args []js.Value) interface{} {
-	// Create a promise
-	promiseConstructor := js.Global().Get("Promise")
-	return promiseConstructor.New(js.FuncOf(func(this js.Value, promiseArgs []js.Value) interface{} {
+	// Create a promise to return to JavaScript
+	promise := js.Global().Get("Promise").New(js.FuncOf(func(this js.Value, promiseArgs []js.Value) interface{} {
 		resolve := promiseArgs[0]
 		reject := promiseArgs[1]
 
-		// Check arguments
+		// Validate arguments
 		if len(args) < 3 {
-			reject.Invoke("Not enough arguments. Expected main audio data, background audio data, and volume.")
+			errorMsg := "Not enough arguments. Expected: mainAudio, bgAudio, volume, [duration]"
+			logError(errorMsg, nil)
+			reject.Invoke(js.Global().Get("Error").New(errorMsg))
 			return nil
 		}
 
+		// Extract arguments
 		mainAudioData := args[0].String()
 		bgAudioData := args[1].String()
 		volume := args[2].Float()
 
-		// Optional duration argument
+		// Optional duration parameter
 		var duration float64 = 0
-		if len(args) > 3 && !args[3].IsUndefined() && !args[3].IsNull() {
+		if len(args) > 3 && !args[3].IsNull() && !args[3].IsUndefined() {
 			duration = args[3].Float()
 		}
 
-		// Extract format information from the data URLs
-		mainFormat, mainMime, err := parseBase64Data(mainAudioData)
-		if err != nil {
-			reject.Invoke(fmt.Sprintf("Error parsing main audio data: %v", err))
-			return nil
-		}
+		logInfo("Starting audio mixing process")
+		logDebug("audio", "Main audio data length: %d, BG audio data length: %d",
+			len(mainAudioData), len(bgAudioData))
+		logDebug("audio", "Volume: %.2f, Duration: %.2f", volume, duration)
 
-		bgFormat, bgMime, err := parseBase64Data(bgAudioData)
-		if err != nil {
-			reject.Invoke(fmt.Sprintf("Error parsing background audio data: %v", err))
-			return nil
-		}
+		// Process the audio files
+		go func() {
+			result, err := processAudioMix(mainAudioData, bgAudioData, volume, duration)
+			if err != nil {
+				logError("Error processing audio mix", err)
+				reject.Invoke(js.Global().Get("Error").New(err.Error()))
+				return
+			}
 
-		// Build the FFmpeg command
-		command := buildFFmpegCommand(mainFormat, bgFormat, volume, duration)
+			// Create a Uint8Array from the result
+			uint8Array := js.Global().Get("Uint8Array").New(len(result))
+			js.CopyBytesToJS(uint8Array, result)
 
-		// Create result object
-		result := make(map[string]interface{})
-		result["command"] = command
-		result["mainAudioFormat"] = mainFormat
-		result["bgAudioFormat"] = bgFormat
-		result["mainAudioMime"] = mainMime
-		result["bgAudioMime"] = bgMime
-		result["volume"] = volume
-		if duration > 0 {
-			result["duration"] = duration
-		}
+			// Create a Blob from the Uint8Array
+			blob := js.Global().Get("Blob").New(js.Global().Get("Array").New(uint8Array),
+				map[string]interface{}{"type": "audio/mp3"})
 
-		// Convert result to JS object
-		resultJS := js.Global().Get("Object").New()
-		for k, v := range result {
-			resultJS.Set(k, v)
-		}
+			logInfo("Audio mixing completed successfully")
+			resolve.Invoke(blob)
+		}()
 
-		resolve.Invoke(resultJS)
 		return nil
 	}))
+
+	return promise
 }
 
-// parseBase64Data extracts format and MIME type from a data URL
-func parseBase64Data(dataUrl string) (string, string, error) {
-	// Check if it's a data URL
-	if !strings.HasPrefix(dataUrl, "data:") {
-		return "", "", fmt.Errorf("not a data URL")
-	}
+// createVideo creates a video from audio and images
+func createVideo(this js.Value, args []js.Value) interface{} {
+	// Create a promise to return to JavaScript
+	promise := js.Global().Get("Promise").New(js.FuncOf(func(this js.Value, promiseArgs []js.Value) interface{} {
+		resolve := promiseArgs[0]
+		reject := promiseArgs[1]
 
-	// Extract MIME type
-	mimeEndIndex := strings.Index(dataUrl, ";base64,")
-	if mimeEndIndex == -1 {
-		return "", "", fmt.Errorf("invalid data URL format")
-	}
-
-	mimeType := dataUrl[5:mimeEndIndex]
-
-	// Determine file format from MIME type
-	var format string
-	switch {
-	case strings.Contains(mimeType, "audio/mpeg"), strings.Contains(mimeType, "audio/mp3"):
-		format = "mp3"
-	case strings.Contains(mimeType, "audio/wav"), strings.Contains(mimeType, "audio/wave"):
-		format = "wav"
-	case strings.Contains(mimeType, "audio/ogg"):
-		format = "ogg"
-	case strings.Contains(mimeType, "audio/aac"):
-		format = "aac"
-	case strings.Contains(mimeType, "audio/flac"):
-		format = "flac"
-	case strings.Contains(mimeType, "video/mp4"):
-		format = "mp4"
-	case strings.Contains(mimeType, "video/webm"):
-		format = "webm"
-	case strings.Contains(mimeType, "video/ogg"):
-		format = "ogv"
-	default:
-		// Try to extract format from the data itself
-		format = detectFormatFromData(dataUrl)
-		if format == "" {
-			return "", "", fmt.Errorf("unsupported format: %s", mimeType)
+		// Validate arguments
+		if len(args) < 3 {
+			errorMsg := "Not enough arguments. Expected: audioData, imageDataArray, settings"
+			logError(errorMsg, nil)
+			reject.Invoke(js.Global().Get("Error").New(errorMsg))
+			return nil
 		}
-	}
 
-	return format, mimeType, nil
-}
+		// Extract arguments
+		audioData := args[0].String()
+		imageDataArrayJS := args[1]
+		settingsJS := args[2]
 
-// detectFormatFromData tries to determine the audio format from the data
-func detectFormatFromData(dataUrl string) string {
-	// This is a simplified detection. In a real application, you would analyze the file headers.
-	if strings.Contains(dataUrl, "audio/mpeg") || strings.Contains(dataUrl, "audio/mp3") {
-		return "mp3"
-	} else if strings.Contains(dataUrl, "audio/wav") || strings.Contains(dataUrl, "audio/wave") {
-		return "wav"
-	} else if strings.Contains(dataUrl, "audio/ogg") {
-		return "ogg"
-	} else if strings.Contains(dataUrl, "audio/aac") {
-		return "aac"
-	} else if strings.Contains(dataUrl, "audio/flac") {
-		return "flac"
-	} else if strings.Contains(dataUrl, "video/mp4") {
-		return "mp4"
-	} else if strings.Contains(dataUrl, "video/webm") {
-		return "webm"
-	} else if strings.Contains(dataUrl, "video/ogg") {
-		return "ogv"
-	}
-	return ""
-}
+		// Parse settings
+		var settings VideoSettings
+		settingsJSON := js.Global().Get("JSON").Call("stringify", settingsJS).String()
+		if err := json.Unmarshal([]byte(settingsJSON), &settings); err != nil {
+			logError("Failed to parse video settings", err)
+			reject.Invoke(js.Global().Get("Error").New("Failed to parse video settings: " + err.Error()))
+			return nil
+		}
 
-// buildFFmpegCommand creates the FFmpeg command for audio mixing
-func buildFFmpegCommand(mainFormat, bgFormat string, volume float64, duration float64) string {
-	// Create a complex FFmpeg command that:
-	// 1. Takes both input files
-	// 2. Adjusts the volume of the background audio
-	// 3. Mixes the two audio streams
-	// 4. Encodes the result as MP3
+		// Parse image data array
+		var imageDataArray []ImageData
+		imageCount := imageDataArrayJS.Length()
+		for i := 0; i < imageCount; i++ {
+			imageJS := imageDataArrayJS.Index(i)
+			imageData := ImageData{
+				Data:     imageJS.Get("data").String(),
+				Duration: imageJS.Get("duration").Float(),
+			}
+			imageDataArray = append(imageDataArray, imageData)
+		}
 
-	// Base command
-	command := fmt.Sprintf("-i main.%s -i bg.%s", mainFormat, bgFormat)
+		logInfo("Starting video creation process")
+		logDebug("video", "Audio data length: %d, Image count: %d", len(audioData), len(imageDataArray))
+		logDebug("video", "Video settings: %+v", settings)
 
-	// Add duration if specified
-	if duration > 0 {
-		command += fmt.Sprintf(" -t %.2f", duration)
-	}
+		// Process the video creation
+		go func() {
+			result, err := processVideoCreation(audioData, imageDataArray, settings)
+			if err != nil {
+				logError("Error processing video creation", err)
+				reject.Invoke(js.Global().Get("Error").New(err.Error()))
+				return
+			}
 
-	// Build filter complex for audio mixing
-	filterComplex := fmt.Sprintf("[1:a]volume=%.2f[bg];[0:a][bg]amix=inputs=2:duration=longest:dropout_transition=2", volume)
+			// Create a Uint8Array from the result
+			uint8Array := js.Global().Get("Uint8Array").New(len(result))
+			js.CopyBytesToJS(uint8Array, result)
 
-	// Add filter complex and output options
-	command += fmt.Sprintf(" -filter_complex \"%s\" -c:a libmp3lame -q:a 2 output.mp3", filterComplex)
+			// Create a Blob from the Uint8Array
+			blob := js.Global().Get("Blob").New(js.Global().Get("Array").New(uint8Array),
+				map[string]interface{}{"type": "video/" + settings.Format})
 
-	return command
-}
+			logInfo("Video creation completed successfully")
+			resolve.Invoke(blob)
+		}()
 
-// errorResult returns a rejected promise with an error message
-func errorResult(msg string) js.Value {
-	promiseConstructor := js.Global().Get("Promise")
-	return promiseConstructor.Call("reject", js.ValueOf(msg))
+		return nil
+	}))
+
+	return promise
 }
